@@ -25,6 +25,8 @@ contract ZeniEngine is ReentrancyGuard {
 
     event CollateralDeposited(address indexed user, address indexed collateral, uint256 amount);
     event ZeniMinted(address indexed user, uint256 amount);
+    event CollateralRedeemed(address indexed user, address indexed collateral, uint256 amount);
+    event ZeniBurned(address indexed user, uint256 amount);
 
     error ZeniEngine__TokensLengthIsDifferentThanPriceFeedLength();
     error ZeniEngine__AmountIsZero();
@@ -59,26 +61,54 @@ contract ZeniEngine is ReentrancyGuard {
         }
     }
 
-    /// @param collateral The address of the collateral token
-    /// @param amount The amount of the collateral to deposit
+    /// @param collateral The address of the collateral token.
+    /// @param amount The amount of the collateral to deposit.
     function depositCollateral(
         address collateral,
         uint256 amount
-    ) external nonReentrant collateralSupported(collateral) amountGreaterThanZero(amount) {
-        s_collateralBalance[msg.sender][collateral] = amount;
+    ) public nonReentrant collateralSupported(collateral) amountGreaterThanZero(amount) {
+        s_collateralBalance[msg.sender][collateral] += amount;
         emit CollateralDeposited(msg.sender, collateral, amount);
         bool success = IERC20(collateral).transferFrom(msg.sender, address(this), amount);
         require(success, ZeniEngine__TokenTransferFailed());
     }
 
-    function depositCollateralAndMintZeni() external {}
+    /// @param collateral The address of the collateral token.
+    /// @param collateralAmount The amount of the collateral to deposit.
+    /// @param amountZeniToMint The amount of Zeni to mint.
+    /// @notice Deposits your collateral and mints Zeni in one transaction.
+    function depositCollateralAndMintZeni(
+        address collateral,
+        uint256 collateralAmount,
+        uint256 amountZeniToMint
+    ) external {
+        depositCollateral(collateral, collateralAmount);
+        mintZeni(amountZeniToMint);
+    }
 
-    function redeemCollateral() external {}
+    /// @param collateral The address of the collateral token.
+    /// @param amount The amount of the collateral to redeem.
+    function redeemCollateral(address collateral, uint256 amount) public nonReentrant amountGreaterThanZero(amount) {
+        address user = msg.sender;
+        s_collateralBalance[user][collateral] -= amount;
+        emit CollateralRedeemed(user, collateral, amount);
+        bool success = IERC20(collateral).transfer(user, amount);
+        require(success, ZeniEngine__TokenTransferFailed());
+        uint256 healthFactor = _getHealthFactor(user);
+        require(healthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__HealthFactorBelowMinimumThreshold());
+    }
 
-    function redeemCollateralForZeni() external {}
+    /// @param collateral The address of the collateral token.
+    /// @param collateralAmount The amount of the collateral to redeem.
+    /// @param amountZeniToBurn The amount of Zeni to burn.
+    /// @notice Burns Zeni and redeems the underlying collateral in one transaction.
+    function redeemCollateralForZeni(address collateral, uint256 collateralAmount, uint256 amountZeniToBurn) external {
+        burnZeni(amountZeniToBurn);
+        redeemCollateral(collateral, collateralAmount);
+    }
 
     /// @param amount The amount of Zeni to mint.
-    function mintZeni(uint256 amount) external nonReentrant amountGreaterThanZero(amount) {
+    function mintZeni(uint256 amount) public nonReentrant amountGreaterThanZero(amount) {
         address user = msg.sender;
         s_amountMinted[user] += amount;
         uint256 healthFactor = _getHealthFactor(user);
@@ -88,7 +118,14 @@ contract ZeniEngine is ReentrancyGuard {
         emit ZeniMinted(user, amount);
     }
 
-    function burnZeni() external {}
+    function burnZeni(uint256 amount) public amountGreaterThanZero(amount) {
+        address user = msg.sender;
+        s_amountMinted[user] -= amount;
+        bool success = IERC20(i_zeni).transferFrom(user, address(this), amount);
+        require(success, ZeniEngine__TokenTransferFailed());
+        i_zeni.burn(amount);
+        emit ZeniBurned(user, amount);
+    }
 
     function liquidate() external {}
 
