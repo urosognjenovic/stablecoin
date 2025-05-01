@@ -107,6 +107,10 @@ contract ZeniEngine is ReentrancyGuard {
         return _getCollateralValueInUSD(token, amount);
     }
 
+    function getSupportedCollaterals() external view returns (address[] memory supportedCollaterals) {
+        return s_supportedCollaterals;
+    }
+
     function _addPriceFeed(address token, address priceFeed) private {
         require(token != address(0), ZeniEngine__TokenIsZeroAddress());
         require(priceFeed != address(0), ZeniEngine__PriceFeedIsZeroAddresss());

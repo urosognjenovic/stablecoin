@@ -16,9 +16,9 @@ contract HelperConfig is Script {
     Config private s_activeConfig;
     uint256 private constant ETHEREUM_SEPOLIA_CHAIN_ID = 11155111;
     uint256 private constant ANVIL_CHAIN_ID = 31337;
-    uint8 private constant DECIMALS = 8;
-    int256 private constant ETH_USD_INITIAL_ANSWER = 1800;
-    int256 private constant BTC_USD_INITIAL_ANSWER = 94000;
+    uint8 public constant DECIMALS = 8;
+    int256 public immutable ETH_USD_INITIAL_ANSWER = 1800e8;
+    int256 public constant BTC_USD_INITIAL_ANSWER = 94000e8;
 
     error HelperConfig__CollateralsLengthIsDifferentThanPriceFeedsLength();
 

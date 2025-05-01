@@ -8,7 +8,7 @@ import {ZeniEngine} from "../src/ZeniEngine.sol";
 import {HelperConfig} from "../script/HelperConfig.s.sol";
 
 contract DeployZeni is Script {
-    function run() external returns (Zeni, ZeniEngine) {
+    function run() external returns (Zeni, ZeniEngine, HelperConfig) {
         HelperConfig helperConfig = new HelperConfig();
         HelperConfig.Config memory config = helperConfig.run();
         (address[] memory collaterals, address[] memory priceFeeds) = (config.collaterals, config.priceFeeds);
@@ -17,6 +17,6 @@ contract DeployZeni is Script {
         ZeniEngine zeniEngine = new ZeniEngine(zeni, collaterals, priceFeeds);
         zeni.transferOwnership(address(zeniEngine));
         vm.stopBroadcast();
-        return (zeni, zeniEngine);
+        return (zeni, zeniEngine, helperConfig);
     }
 }
