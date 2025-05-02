@@ -22,13 +22,19 @@ contract ZeniEngine is ReentrancyGuard {
     uint256 private constant LIQUIDATION_THRESHOLD_IN_PERCENT = 50;
     uint256 private constant LIQUIDATION_PRECISION = 100;
     uint256 private constant MINIMUM_HEALTH_FACTOR = 1;
+    uint256 private constant LIQUIDATION_BONUS_IN_PERCENT = 10;
 
     event CollateralDeposited(address indexed user, address indexed collateral, uint256 amount);
     event ZeniMinted(address indexed user, uint256 amount);
-    event CollateralRedeemed(address indexed user, address indexed collateral, uint256 amount);
+    event CollateralRedeemed(
+        address indexed redeemedFrom,
+        address indexed redeemedTo,
+        address indexed collateral,
+        uint256 amount
+    );
     event ZeniBurned(address indexed user, uint256 amount);
 
-    error ZeniEngine__TokensLengthIsDifferentThanPriceFeedLength();
+    error ZeniEngine__TokensLengthIsDifferentThanPriceFeedsLength();
     error ZeniEngine__AmountIsZero();
     error ZeniEngine__TokenIsZeroAddress();
     error ZeniEngine__PriceFeedIsZeroAddresss();
@@ -36,6 +42,9 @@ contract ZeniEngine is ReentrancyGuard {
     error ZeniEngine__TokenTransferFailed();
     error ZeniEngine__HealthFactorBelowMinimumThreshold();
     error ZeniEngine__MintFailed();
+    error ZeniEngine__HealthFactorIsGreaterThanMinimumHealthFactor();
+    error ZeniEngine__HealthFactorNotImproved();
+    error ZeniEngine__LiquidatorHealthFactorBelowMinimumThreshold();
 
     modifier amountGreaterThanZero(uint256 amount) {
         require(amount > 0, ZeniEngine__AmountIsZero());
@@ -48,7 +57,7 @@ contract ZeniEngine is ReentrancyGuard {
     }
 
     constructor(Zeni zeni, address[] memory tokens, address[] memory priceFeeds) {
-        require(tokens.length == priceFeeds.length, ZeniEngine__TokensLengthIsDifferentThanPriceFeedLength());
+        require(tokens.length == priceFeeds.length, ZeniEngine__TokensLengthIsDifferentThanPriceFeedsLength());
         i_zeni = zeni;
 
         uint256 length = tokens.length;
@@ -89,12 +98,8 @@ contract ZeniEngine is ReentrancyGuard {
     /// @param collateral The address of the collateral token.
     /// @param amount The amount of the collateral to redeem.
     function redeemCollateral(address collateral, uint256 amount) public nonReentrant amountGreaterThanZero(amount) {
-        address user = msg.sender;
-        s_collateralBalance[user][collateral] -= amount;
-        emit CollateralRedeemed(user, collateral, amount);
-        bool success = IERC20(collateral).transfer(user, amount);
-        require(success, ZeniEngine__TokenTransferFailed());
-        uint256 healthFactor = _getHealthFactor(user);
+        _redeemCollateral(msg.sender, msg.sender, collateral, amount);
+        uint256 healthFactor = _getHealthFactor(msg.sender);
         require(healthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__HealthFactorBelowMinimumThreshold());
     }
 
@@ -119,15 +124,42 @@ contract ZeniEngine is ReentrancyGuard {
     }
 
     function burnZeni(uint256 amount) public amountGreaterThanZero(amount) {
-        address user = msg.sender;
-        s_amountMinted[user] -= amount;
-        bool success = IERC20(i_zeni).transferFrom(user, address(this), amount);
-        require(success, ZeniEngine__TokenTransferFailed());
-        i_zeni.burn(amount);
-        emit ZeniBurned(user, amount);
+       _burnZeni(msg.sender, msg.sender, amount);
     }
 
-    function liquidate() external {}
+    function getTokenAmountFromUSD(
+        address collateral,
+        uint256 amountZeniToBurn
+    ) public view returns (uint256 tokenAmount) {
+        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[collateral]).latestRoundData();
+        return (amountZeniToBurn * DECIMALS) / (uint256(price) * PRICE_FEED_PRECISION_TO_MATCH_DECIMALS_PRECISION);
+    }
+
+    /// @param user The address of the user to be liquidated, whose health factor is below MINIMUM_HEALTH_FACTOR.
+    /// @param collateral The address of the collateral token.
+    /// @param amountZeniToBurn The amount of Zeni to burn to improve the user's health factor.
+    /// @notice You can partially liquidate the user as long as it brings their health factor above MINIMUM_HEALTH_FACTOR. As a reward for keeping the protocol secure, you will get a liquidation bonus.
+    function liquidate(
+        address user,
+        address collateral,
+        uint256 amountZeniToBurn
+    ) external nonReentrant amountGreaterThanZero(amountZeniToBurn) {
+        uint256 startingHealthFactor = _getHealthFactor(user);
+        require(
+            startingHealthFactor < MINIMUM_HEALTH_FACTOR,
+            ZeniEngine__HealthFactorIsGreaterThanMinimumHealthFactor()
+        );
+
+        uint256 tokenAmountCoveredFromDebt = getTokenAmountFromUSD(collateral, amountZeniToBurn);
+        uint256 bonusCollateral = (tokenAmountCoveredFromDebt * LIQUIDATION_BONUS_IN_PERCENT) / LIQUIDATION_PRECISION;
+        uint256 totalCollateralToRedeem = tokenAmountCoveredFromDebt + bonusCollateral;
+        _redeemCollateral(user, msg.sender, collateral, totalCollateralToRedeem);
+        _burnZeni(user, msg.sender, amountZeniToBurn);
+        uint256 endingHealthFactor = _getHealthFactor(user);
+        require(endingHealthFactor >= startingHealthFactor, ZeniEngine__HealthFactorNotImproved());
+        uint256 liquidatorHealthFactor = _getHealthFactor(msg.sender);
+        require(liquidatorHealthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__LiquidatorHealthFactorBelowMinimumThreshold());
+    }
 
     function getHealthFactor(address user) external view returns (uint256 healthFactor) {
         return _getHealthFactor(user);
@@ -155,12 +187,34 @@ contract ZeniEngine is ReentrancyGuard {
         s_supportedCollaterals.push(token);
     }
 
+    function _redeemCollateral(address from, address to, address collateral, uint256 amount) private {
+        s_collateralBalance[from][collateral] -= amount;
+        emit CollateralRedeemed(from, to, collateral, amount);
+        bool success = IERC20(collateral).transfer(to, amount);
+        require(success, ZeniEngine__TokenTransferFailed());
+    }
+
+    /// @param onBehalfOf The address that initiated the burn process.
+    /// @param from The address for which the Zeni will be burned.
+    /// @param amount The amount of Zeni to burn.
+    /// @dev Should not be called if health factor is not checked.
+    function _burnZeni(address onBehalfOf, address from, uint256 amount) private {
+        s_amountMinted[onBehalfOf] -= amount;
+        bool success = IERC20(i_zeni).transferFrom(from, address(this), amount);
+        require(success, ZeniEngine__TokenTransferFailed());
+        i_zeni.burn(amount);
+        emit ZeniBurned(from, amount);
+    }
+
     function _getHealthFactor(address user) private view returns (uint256 healthFactor) {
         uint256 amountMinted = s_amountMinted[user];
         uint256 collateralValueInUSD = _getAccountCollateralValueInUSD(user);
         uint256 collateralValueAdjustedForThreshold = (collateralValueInUSD * LIQUIDATION_THRESHOLD_IN_PERCENT) /
             LIQUIDATION_PRECISION;
-        return (collateralValueAdjustedForThreshold * DECIMALS) / amountMinted;
+        if (amountMinted != 0) {
+            return (collateralValueAdjustedForThreshold * DECIMALS) / amountMinted;
+        }
+        return type(uint256).max;
     }
 
     function _getAccountCollateralValueInUSD(address user) private view returns (uint256 accountCollateralValueInUSD) {
