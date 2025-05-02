@@ -20,6 +20,16 @@ contract ZeniEngineTest is Test {
     address private constant INVALID_COLLATERAL_ADDRESS = address(1);
     uint256 private constant AMOUNT = 10e18;
 
+    modifier aliceDepositedCollateral() {
+        address collateral = s_config.getActiveConfig().collaterals[0];
+        ERC20Mock(collateral).mint(i_alice, COLLATERAL_AMOUNT);
+        vm.startPrank(i_alice);
+        ERC20Mock(collateral).approve(address(s_zeniEngine), COLLATERAL_AMOUNT);
+        s_zeniEngine.depositCollateral(collateral, COLLATERAL_AMOUNT);
+        vm.stopPrank();
+        _;
+    }
+
     function setUp() external {
         s_deployer = new DeployZeni();
         (s_zeni, s_zeniEngine, s_config) = s_deployer.run();
@@ -47,5 +57,18 @@ contract ZeniEngineTest is Test {
         ERC20Mock(collateral).approve(address(s_zeniEngine), COLLATERAL_AMOUNT);
         vm.expectRevert(ZeniEngine.ZeniEngine__AmountIsZero.selector);
         s_zeniEngine.depositCollateral(collateral, 0);
+        vm.stopPrank();
+    }
+
+    function testDepositCollateralUpdatesBalanceAndEmitsEvent() external {
+        address collateral = s_config.getActiveConfig().collaterals[0];
+        ERC20Mock(collateral).mint(i_alice, COLLATERAL_AMOUNT);
+        vm.startPrank(i_alice);
+        ERC20Mock(collateral).approve(address(s_zeniEngine), COLLATERAL_AMOUNT);
+        vm.expectEmit(true, true, false, true);
+        emit ZeniEngine.CollateralDeposited(i_alice, collateral, COLLATERAL_AMOUNT);
+        s_zeniEngine.depositCollateral(collateral, COLLATERAL_AMOUNT);
+        vm.stopPrank();
+        assertEq(s_zeniEngine.getCollateralBalance(i_alice, collateral), COLLATERAL_AMOUNT);
     }
 }

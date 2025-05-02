@@ -18,7 +18,7 @@ contract Zeni is ERC20Burnable, Ownable {
 
     function mint(address to, uint256 amount) external onlyOwner returns (bool) {
         require(to != address(0), Zeni__MintingToZeroAddress());
-        require(amount != 0, Zeni__AmountIsZero());
+        require(amount > 0, Zeni__AmountIsZero());
         _mint(to, amount);
         return true;
     }
