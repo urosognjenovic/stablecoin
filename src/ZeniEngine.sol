@@ -83,6 +83,67 @@ contract ZeniEngine is ReentrancyGuard {
     }
 
     /// @param collateral The address of the collateral token.
+    /// @param amount The amount of the collateral to redeem.
+    function redeemCollateral(address collateral, uint256 amount) public nonReentrant amountGreaterThanZero(amount) {
+        _redeemCollateral(msg.sender, msg.sender, collateral, amount);
+        uint256 healthFactor = getHealthFactor(msg.sender);
+        require(healthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__HealthFactorBelowMinimumThreshold());
+    }
+
+    /// @param amount The amount of Zeni to mint.
+    function mintZeni(uint256 amount) public nonReentrant amountGreaterThanZero(amount) {
+        address user = msg.sender;
+        s_amountMinted[user] += amount;
+        uint256 healthFactor = getHealthFactor(user);
+        require(healthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__HealthFactorBelowMinimumThreshold());
+        bool success = i_zeni.mint(user, amount);
+        require(success, ZeniEngine__MintFailed());
+        emit ZeniMinted(user, amount);
+    }
+
+    function burnZeni(uint256 amount) public amountGreaterThanZero(amount) {
+        _burnZeni(msg.sender, msg.sender, amount);
+    }
+
+    function getTokenAmountFromUSD(
+        address collateral,
+        uint256 amountZeniToBurn
+    ) public view returns (uint256 tokenAmount) {
+        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[collateral]).latestRoundData();
+        return (amountZeniToBurn * DECIMALS) / (uint256(price) * PRICE_FEED_PRECISION_TO_MATCH_DECIMALS_PRECISION);
+    }
+
+    function getHealthFactor(address user) public view returns (uint256 healthFactor) {
+        uint256 amountMinted = s_amountMinted[user];
+        uint256 collateralValueInUSD = getAccountCollateralValueInUSD(user);
+        uint256 collateralValueAdjustedForThreshold = (collateralValueInUSD * LIQUIDATION_THRESHOLD_IN_PERCENT) /
+            LIQUIDATION_PRECISION;
+        if (amountMinted != 0) {
+            return (collateralValueAdjustedForThreshold * DECIMALS) / amountMinted;
+        }
+        return type(uint256).max;
+    }
+
+    function getAccountCollateralValueInUSD(address user) public view returns (uint256 accountCollateralValueInUSD) {
+        uint256 length = s_supportedCollaterals.length;
+        for (uint8 i; i < length; ) {
+            address collateral = s_supportedCollaterals[i];
+            uint256 amount = s_collateralBalance[user][collateral];
+            accountCollateralValueInUSD += getCollateralValueInUSD(collateral, amount);
+
+            unchecked {
+                ++i;
+            }
+        }
+        return accountCollateralValueInUSD;
+    }
+
+    function getCollateralValueInUSD(address token, uint256 amount) public view returns (uint256 collateralValueInUSD) {
+        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[token]).latestRoundData();
+        return (amount * (uint256(price) * PRICE_FEED_PRECISION_TO_MATCH_DECIMALS_PRECISION)) / DECIMALS;
+    }
+
+    /// @param collateral The address of the collateral token.
     /// @param collateralAmount The amount of the collateral to deposit.
     /// @param amountZeniToMint The amount of Zeni to mint.
     /// @notice Deposits your collateral and mints Zeni in one transaction.
@@ -96,43 +157,12 @@ contract ZeniEngine is ReentrancyGuard {
     }
 
     /// @param collateral The address of the collateral token.
-    /// @param amount The amount of the collateral to redeem.
-    function redeemCollateral(address collateral, uint256 amount) public nonReentrant amountGreaterThanZero(amount) {
-        _redeemCollateral(msg.sender, msg.sender, collateral, amount);
-        uint256 healthFactor = _getHealthFactor(msg.sender);
-        require(healthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__HealthFactorBelowMinimumThreshold());
-    }
-
-    /// @param collateral The address of the collateral token.
     /// @param collateralAmount The amount of the collateral to redeem.
     /// @param amountZeniToBurn The amount of Zeni to burn.
     /// @notice Burns Zeni and redeems the underlying collateral in one transaction.
     function redeemCollateralForZeni(address collateral, uint256 collateralAmount, uint256 amountZeniToBurn) external {
         burnZeni(amountZeniToBurn);
         redeemCollateral(collateral, collateralAmount);
-    }
-
-    /// @param amount The amount of Zeni to mint.
-    function mintZeni(uint256 amount) public nonReentrant amountGreaterThanZero(amount) {
-        address user = msg.sender;
-        s_amountMinted[user] += amount;
-        uint256 healthFactor = _getHealthFactor(user);
-        require(healthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__HealthFactorBelowMinimumThreshold());
-        bool success = i_zeni.mint(user, amount);
-        require(success, ZeniEngine__MintFailed());
-        emit ZeniMinted(user, amount);
-    }
-
-    function burnZeni(uint256 amount) public amountGreaterThanZero(amount) {
-       _burnZeni(msg.sender, msg.sender, amount);
-    }
-
-    function getTokenAmountFromUSD(
-        address collateral,
-        uint256 amountZeniToBurn
-    ) public view returns (uint256 tokenAmount) {
-        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[collateral]).latestRoundData();
-        return (amountZeniToBurn * DECIMALS) / (uint256(price) * PRICE_FEED_PRECISION_TO_MATCH_DECIMALS_PRECISION);
     }
 
     /// @param user The address of the user to be liquidated, whose health factor is below MINIMUM_HEALTH_FACTOR.
@@ -144,7 +174,7 @@ contract ZeniEngine is ReentrancyGuard {
         address collateral,
         uint256 amountZeniToBurn
     ) external nonReentrant amountGreaterThanZero(amountZeniToBurn) {
-        uint256 startingHealthFactor = _getHealthFactor(user);
+        uint256 startingHealthFactor = getHealthFactor(user);
         require(
             startingHealthFactor < MINIMUM_HEALTH_FACTOR,
             ZeniEngine__HealthFactorIsGreaterThanMinimumHealthFactor()
@@ -155,25 +185,13 @@ contract ZeniEngine is ReentrancyGuard {
         uint256 totalCollateralToRedeem = tokenAmountCoveredFromDebt + bonusCollateral;
         _redeemCollateral(user, msg.sender, collateral, totalCollateralToRedeem);
         _burnZeni(user, msg.sender, amountZeniToBurn);
-        uint256 endingHealthFactor = _getHealthFactor(user);
+        uint256 endingHealthFactor = getHealthFactor(user);
         require(endingHealthFactor >= startingHealthFactor, ZeniEngine__HealthFactorNotImproved());
-        uint256 liquidatorHealthFactor = _getHealthFactor(msg.sender);
-        require(liquidatorHealthFactor >= MINIMUM_HEALTH_FACTOR, ZeniEngine__LiquidatorHealthFactorBelowMinimumThreshold());
-    }
-
-    function getHealthFactor(address user) external view returns (uint256 healthFactor) {
-        return _getHealthFactor(user);
-    }
-
-    function getAccountCollateralValueInUSD(address user) external view returns (uint256 collateralValueInUSD) {
-        return _getAccountCollateralValueInUSD(user);
-    }
-
-    function getCollateralValueInUSD(
-        address token,
-        uint256 amount
-    ) external view returns (uint256 collateralValueInUSD) {
-        return _getCollateralValueInUSD(token, amount);
+        uint256 liquidatorHealthFactor = getHealthFactor(msg.sender);
+        require(
+            liquidatorHealthFactor >= MINIMUM_HEALTH_FACTOR,
+            ZeniEngine__LiquidatorHealthFactorBelowMinimumThreshold()
+        );
     }
 
     function getSupportedCollaterals() external view returns (address[] memory supportedCollaterals) {
@@ -204,38 +222,5 @@ contract ZeniEngine is ReentrancyGuard {
         require(success, ZeniEngine__TokenTransferFailed());
         i_zeni.burn(amount);
         emit ZeniBurned(from, amount);
-    }
-
-    function _getHealthFactor(address user) private view returns (uint256 healthFactor) {
-        uint256 amountMinted = s_amountMinted[user];
-        uint256 collateralValueInUSD = _getAccountCollateralValueInUSD(user);
-        uint256 collateralValueAdjustedForThreshold = (collateralValueInUSD * LIQUIDATION_THRESHOLD_IN_PERCENT) /
-            LIQUIDATION_PRECISION;
-        if (amountMinted != 0) {
-            return (collateralValueAdjustedForThreshold * DECIMALS) / amountMinted;
-        }
-        return type(uint256).max;
-    }
-
-    function _getAccountCollateralValueInUSD(address user) private view returns (uint256 accountCollateralValueInUSD) {
-        uint256 length = s_supportedCollaterals.length;
-        for (uint8 i; i < length; ) {
-            address collateral = s_supportedCollaterals[i];
-            uint256 amount = s_collateralBalance[user][collateral];
-            accountCollateralValueInUSD += _getCollateralValueInUSD(collateral, amount);
-
-            unchecked {
-                ++i;
-            }
-        }
-        return accountCollateralValueInUSD;
-    }
-
-    function _getCollateralValueInUSD(
-        address token,
-        uint256 amount
-    ) private view returns (uint256 collateralValueInUSD) {
-        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[token]).latestRoundData();
-        return (amount * (uint256(price) * PRICE_FEED_PRECISION_TO_MATCH_DECIMALS_PRECISION)) / DECIMALS;
     }
 }
