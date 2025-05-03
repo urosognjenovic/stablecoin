@@ -21,7 +21,7 @@ contract ZeniEngine is ReentrancyGuard {
     // 200% overcollateralized
     uint256 private constant LIQUIDATION_THRESHOLD_IN_PERCENT = 50;
     uint256 private constant LIQUIDATION_PRECISION = 100;
-    uint256 private constant MINIMUM_HEALTH_FACTOR = 1;
+    uint256 private constant MINIMUM_HEALTH_FACTOR = 1e18;
     uint256 private constant LIQUIDATION_BONUS_IN_PERCENT = 10;
 
     event CollateralDeposited(address indexed user, address indexed collateral, uint256 amount);
@@ -200,6 +200,10 @@ contract ZeniEngine is ReentrancyGuard {
 
     function getCollateralBalance(address user, address collateral) external view returns (uint256 balance) {
         return s_collateralBalance[user][collateral];
+    }
+
+    function getAmountMinted(address user) external view returns (uint256 amountMinted) {
+        return s_amountMinted[user];
     }
 
     function _addPriceFeed(address token, address priceFeed) private {
