@@ -21,7 +21,7 @@ contract ZeniEngineTest is Test {
     uint256 private constant AMOUNT_TO_MINT = 2e18;
     uint256 private constant INVALID_AMOUNT_TO_MINT = 5000e18;
     uint256 private constant AMOUNT_TO_BURN = AMOUNT_TO_MINT;
-    uint256 private constant VALID_AMOUNT_TO_WITHDRAW = 1e18;
+    uint256 private constant VALID_AMOUNT_TO_REDEEM = 1e18;
     uint256 private constant ZERO_AMOUNT = 0;
     uint256 private constant FIRST_COLLATERAL_INDEX = 0;
     // Initialized in setUp()
@@ -121,7 +121,7 @@ contract ZeniEngineTest is Test {
         aliceMintedZeni
         prankAlice
     {
-        s_zeniEngine.redeemCollateral(s_firstCollateral, VALID_AMOUNT_TO_WITHDRAW);
+        s_zeniEngine.redeemCollateral(s_firstCollateral, VALID_AMOUNT_TO_REDEEM);
     }
 
     function testMintZeniRevertsWhenAmountIsZero() external prankAlice {
@@ -162,5 +162,16 @@ contract ZeniEngineTest is Test {
     function testDepositCollateralAndMintZeni() external mintedCollateralToAlice startStopPrankAlice {
         ERC20Mock(s_firstCollateral).approve(address(s_zeniEngine), COLLATERAL_AMOUNT);
         s_zeniEngine.depositCollateralAndMintZeni(s_firstCollateral, COLLATERAL_AMOUNT, AMOUNT_TO_MINT);
+    }
+
+    function testRedeemCollateralForZeni()
+        external
+        mintedCollateralToAlice
+        aliceDepositedCollateral
+        aliceMintedZeni
+        startStopPrankAlice
+    {
+        s_zeni.approve(address(s_zeniEngine), AMOUNT_TO_MINT);
+        s_zeniEngine.redeemCollateralForZeni(s_firstCollateral, COLLATERAL_AMOUNT, AMOUNT_TO_MINT);
     }
 }

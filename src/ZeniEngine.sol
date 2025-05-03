@@ -115,13 +115,13 @@ contract ZeniEngine is ReentrancyGuard {
 
     function getHealthFactor(address user) public view returns (uint256 healthFactor) {
         uint256 amountMinted = s_amountMinted[user];
+        if (amountMinted == 0) {
+            return type(uint256).max;
+        }
         uint256 collateralValueInUSD = getAccountCollateralValueInUSD(user);
         uint256 collateralValueAdjustedForThreshold = (collateralValueInUSD * LIQUIDATION_THRESHOLD_IN_PERCENT) /
             LIQUIDATION_PRECISION;
-        if (amountMinted != 0) {
-            return (collateralValueAdjustedForThreshold * DECIMALS) / amountMinted;
-        }
-        return type(uint256).max;
+        return (collateralValueAdjustedForThreshold * DECIMALS) / amountMinted;
     }
 
     function getAccountCollateralValueInUSD(address user) public view returns (uint256 accountCollateralValueInUSD) {
