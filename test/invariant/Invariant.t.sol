@@ -1,8 +1,8 @@
-// SDPX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 pragma solidity 0.8.28;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {DeployZeni} from "../../script/DeployZeni.s.sol";
 import {Zeni} from "../../src/Zeni.sol";
@@ -37,7 +37,7 @@ contract InvariantTest is StdInvariant, Test {
             collateral = IERC20(s_collaterals[i]);
             totalCollateralValueInUSD += s_zeniEngine.getCollateralValueInUSD(
                 s_collaterals[i],
-                collateral.balanceOf(address(s_zeni))
+                collateral.balanceOf(address(s_zeniEngine))
             );
             unchecked {
                 ++i;

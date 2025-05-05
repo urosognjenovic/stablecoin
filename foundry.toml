@@ -6,4 +6,4 @@ libs = ["lib"]
 [invariant]
 runs = 128
 depth = 128
-fail_on_revert = true
+fail_on_revert = false

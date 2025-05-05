@@ -6,11 +6,14 @@ import {Zeni} from "./Zeni.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "chainlink-brownie-contracts/contracts/shared/interfaces/AggregatorV3Interface.sol";
+import {OracleLib} from "./lib/OracleLib.sol";
 
 /// @title ZeniEngine
 /// @author Uroš Ognjenović
 /// @notice The system is designed to maintain the peg to 1 USD. Zeni stablecoin has the following properties: Exogenous Collateral, Dollar Peggeed, Algorithmically Stable. This contract is the core of the Zeni System. It handles all the logic for minting and burning Zeni, as well as depositing and withdrawing collateral. This contract is loosely based on the MakerDAO DAI stablecoin.
 contract ZeniEngine is ReentrancyGuard {
+    using OracleLib for AggregatorV3Interface;
+
     Zeni private immutable i_zeni;
     address[] private s_supportedCollaterals;
     mapping(address token => address priceFeed) private s_priceFeeds;
@@ -109,7 +112,7 @@ contract ZeniEngine is ReentrancyGuard {
         address collateral,
         uint256 amountZeniToBurn
     ) public view returns (uint256 tokenAmount) {
-        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[collateral]).latestRoundData();
+        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[collateral]).checkStalePrice();
         return (amountZeniToBurn * DECIMALS) / (uint256(price) * PRICE_FEED_PRECISION_TO_MATCH_DECIMALS_PRECISION);
     }
 
@@ -139,7 +142,7 @@ contract ZeniEngine is ReentrancyGuard {
     }
 
     function getCollateralValueInUSD(address token, uint256 amount) public view returns (uint256 collateralValueInUSD) {
-        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[token]).latestRoundData();
+        (, int256 price, , , ) = AggregatorV3Interface(s_priceFeeds[token]).checkStalePrice();
         return (amount * (uint256(price) * PRICE_FEED_PRECISION_TO_MATCH_DECIMALS_PRECISION)) / DECIMALS;
     }
 
@@ -204,6 +207,10 @@ contract ZeniEngine is ReentrancyGuard {
 
     function getAmountMinted(address user) external view returns (uint256 amountMinted) {
         return s_amountMinted[user];
+    }
+
+    function getPriceFeed(address collateral) external view returns (address priceFeed) {
+        return s_priceFeeds[collateral];
     }
 
     function _addPriceFeed(address token, address priceFeed) private {
